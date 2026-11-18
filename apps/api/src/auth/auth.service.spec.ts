@@ -22,6 +22,7 @@ describe('AuthService', () => {
       updateMany: jest.fn(),
     },
     $transaction: jest.fn(),
+    $queryRaw: jest.fn(),
   };
   const jwtService = { signAsync: jest.fn().mockResolvedValue('access-token') };
   const response = {
@@ -139,13 +140,15 @@ describe('AuthService', () => {
   });
 
   it('rejects expired refresh sessions', async () => {
-    prisma.session.findFirst.mockResolvedValue({
-      id: 'old',
-      userId: 'u1',
-      user: { id: 'u1', email: 'a@b.com', name: 'A' },
-      expiresAt: new Date(Date.now() - 60_000),
-      revokedAt: null,
-    });
+    prisma.$queryRaw.mockResolvedValue([
+      {
+        id: 'old',
+        userId: 'u1',
+        expiresAt: new Date(Date.now() - 60_000),
+        revokedAt: null,
+        replacedById: null,
+      },
+    ]);
     prisma.session.update.mockResolvedValue({});
 
     await expect(service.refresh('token', response)).rejects.toThrow(
@@ -168,12 +171,19 @@ describe('AuthService', () => {
 
   it('rotates refresh tokens', async () => {
     const raw = 'refresh-raw';
-    prisma.session.findFirst.mockResolvedValue({
-      id: 'old',
-      userId: 'u1',
-      user: { id: 'u1', email: 'a@b.com', name: 'A' },
-      expiresAt: new Date(Date.now() + 60_000),
-      revokedAt: null,
+    prisma.$queryRaw.mockResolvedValue([
+      {
+        id: 'old',
+        userId: 'u1',
+        expiresAt: new Date(Date.now() + 60_000),
+        revokedAt: null,
+        replacedById: null,
+      },
+    ]);
+    prisma.user.findUnique.mockResolvedValue({
+      id: 'u1',
+      email: 'a@b.com',
+      name: 'A',
     });
     prisma.session.create.mockResolvedValue({ id: 'new' });
 
@@ -184,18 +194,39 @@ describe('AuthService', () => {
     expect(prisma.session.create).toHaveBeenCalled();
   });
 
-  it('detects refresh token reuse', async () => {
-    prisma.session.findFirst.mockResolvedValue({
-      id: 'old',
-      userId: 'u1',
-      user: { id: 'u1', email: 'a@b.com', name: 'A' },
-      revokedAt: new Date(),
-    });
+  it('rejects a rotated refresh token without mass revocation', async () => {
+    prisma.$queryRaw.mockResolvedValue([
+      {
+        id: 'old',
+        userId: 'u1',
+        expiresAt: new Date(Date.now() + 60_000),
+        revokedAt: new Date(),
+        replacedById: 'replacement',
+      },
+    ]);
+
+    await expect(service.refresh('token', response)).rejects.toThrow(
+      'Session expired',
+    );
+    expect(prisma.session.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('detects refresh token reuse after logout-style revocation', async () => {
+    prisma.$queryRaw.mockResolvedValue([
+      {
+        id: 'old',
+        userId: 'u1',
+        expiresAt: new Date(Date.now() + 60_000),
+        revokedAt: new Date(),
+        replacedById: null,
+      },
+    ]);
     prisma.session.updateMany.mockResolvedValue({ count: 1 });
 
     await expect(service.refresh('token', response)).rejects.toThrow(
       'Session reuse detected',
     );
+    expect(prisma.session.updateMany).toHaveBeenCalled();
   });
 
   it('hashes passwords with argon2id', async () => {

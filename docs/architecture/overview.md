@@ -10,7 +10,7 @@ SyncBoard is a real-time collaborative workspace delivered as a **pnpm monorepo*
 | --- | --- |
 | `apps/web` | Next.js App Router UI, client state, API consumption |
 | `apps/api` | NestJS REST API, validation, persistence |
-| `packages/shared` | Cross-cutting TypeScript contracts (health payload in M1) |
+| `packages/shared` | Cross-cutting TypeScript contracts (health, auth, workspace) |
 | `infrastructure/docker` | Notes and future infra assets; PostgreSQL compose at repo root |
 
 ## Frontend / backend separation
@@ -63,3 +63,8 @@ Milestone 1 deliberately excludes Redis, WebSockets, and presence. Planned evolu
 2. **REST first** — simpler operations and testing before real-time complexity.
 3. **Prisma over raw SQL** — type-safe schema evolution for a growing domain.
 4. **Health endpoint with liveness + DB readiness** — supports orchestration and dashboard status without auth.
+
+## Domain architecture docs
+
+- [Authentication](authentication.md) (Milestone 2)
+- [Workspaces & membership](workspaces.md) (Milestone 3)

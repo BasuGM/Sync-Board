@@ -13,6 +13,59 @@ export class ApiError extends Error {
   }
 }
 
+const DEFAULT_ERROR_MESSAGE = 'Something went wrong. Please try again.';
+
+export function extractApiErrorMessage(body: unknown, status: number): string {
+  const statusFallback = `API request failed: ${status}`;
+
+  if (body === null || body === undefined) {
+    return statusFallback;
+  }
+
+  if (typeof body === 'string') {
+    const trimmed = body.trim();
+    return trimmed || statusFallback;
+  }
+
+  if (typeof body !== 'object') {
+    return statusFallback;
+  }
+
+  const record = body as Record<string, unknown>;
+  const payload = record.message;
+
+  if (typeof payload === 'string') {
+    const trimmed = payload.trim();
+    return trimmed || statusFallback;
+  }
+
+  if (Array.isArray(payload)) {
+    const parts = payload
+      .filter((item): item is string => typeof item === 'string')
+      .map((item) => item.trim())
+      .filter(Boolean);
+    if (parts.length > 0) {
+      return parts.join(' ');
+    }
+  }
+
+  if (payload && typeof payload === 'object') {
+    const nested = payload as Record<string, unknown>;
+    if (typeof nested.message === 'string') {
+      const trimmed = nested.message.trim();
+      if (trimmed) {
+        return trimmed;
+      }
+    }
+  }
+
+  if (status >= 500) {
+    return DEFAULT_ERROR_MESSAGE;
+  }
+
+  return statusFallback;
+}
+
 let refreshInFlight: Promise<string | null> | null = null;
 
 async function refreshAccessToken(): Promise<string | null> {
@@ -70,10 +123,7 @@ export async function apiRequest<T>(path: string, init?: RequestInit, retried = 
   const body = await response.json().catch(() => undefined);
 
   if (!response.ok) {
-    const message =
-      typeof body === 'object' && body && 'message' in body
-        ? String((body as { message: unknown }).message)
-        : `API request failed: ${response.status}`;
+    const message = extractApiErrorMessage(body, response.status);
     throw new ApiError(message, response.status, body);
   }
 

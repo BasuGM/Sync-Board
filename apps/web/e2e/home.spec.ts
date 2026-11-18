@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 
-test('homepage renders SyncBoard shell', async ({ page }) => {
+test('protected dashboard redirects unauthenticated users to login', async ({ page }) => {
   await page.goto('/');
-  await expect(page.getByRole('heading', { name: 'Welcome to SyncBoard' })).toBeVisible();
-  await expect(page.getByLabel('Primary navigation')).toBeVisible();
+  await expect(page).toHaveURL(/\/login$/, { timeout: 20_000 });
+  await expect(page.getByRole('heading', { name: 'Sign in to SyncBoard' })).toBeVisible();
 });

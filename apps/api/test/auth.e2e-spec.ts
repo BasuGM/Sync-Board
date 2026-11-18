@@ -59,10 +59,43 @@ describeAuthE2e('Auth (e2e)', () => {
     const refreshed = await agent.post('/api/v1/auth/refresh').expect(201);
     expect(refreshed.body.accessToken).toBeDefined();
 
+    await agent.post('/api/v1/auth/logout').expect(201);
+  });
+
+  it('logs out with refresh cookie only and blocks subsequent refresh', async () => {
+    const logoutEmail = `logout-${Date.now()}@syncboard.test`;
+    const agent = request.agent(app.getHttpServer());
     await agent
-      .post('/api/v1/auth/logout')
-      .set('Authorization', `Bearer ${refreshed.body.accessToken}`)
+      .post('/api/v1/auth/register')
+      .send({ name: 'Logout QA', email: logoutEmail, password: 'Password1' })
       .expect(201);
+
+    await agent.post('/api/v1/auth/logout').expect(201);
+    await agent.post('/api/v1/auth/refresh').expect(401);
+  });
+
+  it('rejects whitespace-only registration names', async () => {
+    await request(app.getHttpServer())
+      .post('/api/v1/auth/register')
+      .send({
+        name: '   ',
+        email: `name-${Date.now()}@syncboard.test`,
+        password: 'Password1',
+      })
+      .expect(400);
+  });
+
+  it('persists trimmed multi-word names', async () => {
+    const trimmedEmail = `trim-${Date.now()}@syncboard.test`;
+    const register = await request(app.getHttpServer())
+      .post('/api/v1/auth/register')
+      .send({
+        name: '  John   Doe  ',
+        email: trimmedEmail,
+        password: 'Password1',
+      })
+      .expect(201);
+    expect(register.body.user.name).toBe('John Doe');
   });
 
   it('rejects unauthorized /auth/me', async () => {

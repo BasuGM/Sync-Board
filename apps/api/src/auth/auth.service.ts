@@ -120,7 +120,7 @@ export class AuthService {
 
     try {
       const user = await this.prisma.user.create({
-        data: { email, name: dto.name.trim(), passwordHash },
+        data: { email, name: dto.name, passwordHash },
       });
       return this.buildAuthResponse(user, response);
     } catch (error) {
@@ -157,35 +157,60 @@ export class AuthService {
     }
 
     const tokenHash = hashRefreshToken(rawToken);
-    const session = await this.prisma.session.findFirst({
-      where: { refreshTokenHash: tokenHash },
-      include: { user: true },
-    });
 
-    if (!session) {
-      throw new UnauthorizedException('Session expired');
-    }
+    type LockedSessionRow = {
+      id: string;
+      userId: string;
+      expiresAt: Date;
+      revokedAt: Date | null;
+      replacedById: string | null;
+    };
 
-    if (session.revokedAt) {
-      await this.revokeAllUserSessions(session.userId);
-      this.clearRefreshCookie(response);
-      throw new UnauthorizedException('Session reuse detected');
-    }
+    return this.prisma.$transaction(async (tx) => {
+      const locked = await tx.$queryRaw<LockedSessionRow[]>`
+        SELECT id, "userId", "expiresAt", "revokedAt", "replacedById"
+        FROM "Session"
+        WHERE "refreshTokenHash" = ${tokenHash}
+        FOR UPDATE
+      `;
 
-    if (session.expiresAt < new Date()) {
-      await this.prisma.session.update({
-        where: { id: session.id },
-        data: { revokedAt: new Date() },
-      });
-      this.clearRefreshCookie(response);
-      throw new UnauthorizedException('Session expired');
-    }
+      const session = locked[0];
+      if (!session) {
+        throw new UnauthorizedException('Session expired');
+      }
 
-    const rawRefresh = generateRefreshToken();
-    const refreshTokenHash = hashRefreshToken(rawRefresh);
-    const expiresAt = refreshExpiresAt(this.authConfig.refreshTokenExpiresDays);
+      if (session.revokedAt) {
+        this.clearRefreshCookie(response);
+        if (session.replacedById) {
+          throw new UnauthorizedException('Session expired');
+        }
+        await tx.session.updateMany({
+          where: { userId: session.userId, revokedAt: null },
+          data: { revokedAt: new Date() },
+        });
+        throw new UnauthorizedException('Session reuse detected');
+      }
 
-    await this.prisma.$transaction(async (tx) => {
+      if (session.expiresAt < new Date()) {
+        await tx.session.update({
+          where: { id: session.id },
+          data: { revokedAt: new Date() },
+        });
+        this.clearRefreshCookie(response);
+        throw new UnauthorizedException('Session expired');
+      }
+
+      const user = await tx.user.findUnique({ where: { id: session.userId } });
+      if (!user) {
+        throw new UnauthorizedException('Session expired');
+      }
+
+      const rawRefresh = generateRefreshToken();
+      const refreshTokenHash = hashRefreshToken(rawRefresh);
+      const expiresAt = refreshExpiresAt(
+        this.authConfig.refreshTokenExpiresDays,
+      );
+
       const newSession = await tx.session.create({
         data: {
           userId: session.userId,
@@ -193,19 +218,20 @@ export class AuthService {
           expiresAt,
         },
       });
+
       await tx.session.update({
         where: { id: session.id },
         data: { revokedAt: new Date(), replacedById: newSession.id },
       });
+
+      const accessToken = await this.signAccessToken(user);
+      this.setRefreshCookie(response, rawRefresh);
+
+      return {
+        accessToken,
+        user: this.toUserDto(user),
+      };
     });
-
-    const accessToken = await this.signAccessToken(session.user);
-    this.setRefreshCookie(response, rawRefresh);
-
-    return {
-      accessToken,
-      user: this.toUserDto(session.user),
-    };
   }
 
   async logout(
@@ -228,12 +254,5 @@ export class AuthService {
       throw new UnauthorizedException();
     }
     return this.toUserDto(user);
-  }
-
-  private async revokeAllUserSessions(userId: string) {
-    await this.prisma.session.updateMany({
-      where: { userId, revokedAt: null },
-      data: { revokedAt: new Date() },
-    });
   }
 }

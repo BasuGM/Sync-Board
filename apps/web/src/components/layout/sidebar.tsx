@@ -6,7 +6,7 @@ import { useUiStore } from '@/stores/ui-store';
 
 const NAV_ITEMS = [
   { href: '/', label: 'Dashboard' },
-  { href: '#workspaces', label: 'Workspaces', disabled: true },
+  { href: '/workspaces', label: 'Workspaces' },
   { href: '#boards', label: 'Boards', disabled: true },
   { href: '#tasks', label: 'Tasks', disabled: true },
   { href: '#settings', label: 'Settings', disabled: true },
@@ -37,7 +37,9 @@ export function Sidebar() {
 
       <nav className="space-y-1 p-3">
         {NAV_ITEMS.map((item) => {
-          const isActive = pathname === item.href;
+          const isActive =
+            pathname === item.href ||
+            (item.href !== '/' && pathname.startsWith(`${item.href}/`));
           const className = `flex items-center rounded-lg px-3 py-2 text-sm transition ${
             item.disabled
               ? 'cursor-not-allowed text-slate-500'

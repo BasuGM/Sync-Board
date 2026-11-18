@@ -1,6 +1,7 @@
 import { Transform } from 'class-transformer';
 import {
   IsEmail,
+  IsNotEmpty,
   IsString,
   Matches,
   MaxLength,
@@ -8,8 +9,15 @@ import {
 } from 'class-validator';
 
 export class RegisterDto {
+  @Transform(({ value }) => {
+    if (typeof value !== 'string') {
+      return value;
+    }
+    return value.trim().replace(/\s+/g, ' ');
+  })
   @IsString()
-  @MinLength(2)
+  @IsNotEmpty({ message: 'Name is required' })
+  @MinLength(2, { message: 'Name must be at least 2 characters' })
   @MaxLength(100)
   name!: string;
 

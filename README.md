@@ -44,6 +44,7 @@ pnpm --filter @syncboard/shared build
 | `JWT_ACCESS_EXPIRES_IN` | API | Access token TTL (e.g. `15m`) |
 | `JWT_REFRESH_EXPIRES_DAYS` | API | Refresh session lifetime in days |
 | `REFRESH_COOKIE_NAME` | API | HttpOnly refresh cookie name (default `syncboard_refresh`) |
+| `WORKSPACE_INVITATION_EXPIRES_DAYS` | API | Workspace invitation TTL in days (default `7`) |
 | `NEXT_PUBLIC_API_URL` | Web | Public API base URL |
 | `POSTGRES_*` | Docker | Database credentials |
 
@@ -97,7 +98,7 @@ curl http://localhost:3001/api/v1/health
 
 ### UI has no styles (CSS 404)
 
-Usually a **stale Next.js dev server** on port `3000` serving HTML that points at missing `/_next/static/css/...` assets.
+Tailwind/PostCSS and `globals.css` are wired correctly in the Next.js app; unstyled auth screens in QA were caused by a **stale Next.js dev server** on port `3000` serving HTML that points at missing `/_next/static/css/...` assets—not a missing Tailwind configuration.
 
 ```bash
 # macOS: stop whatever is listening on 3000
@@ -130,7 +131,7 @@ Registration and login use **JWT access tokens** (Bearer, in-memory in the brows
 | `POST` | `/api/v1/auth/register` | JSON body: `name`, `email`, `password` |
 | `POST` | `/api/v1/auth/login` | JSON body: `email`, `password` |
 | `POST` | `/api/v1/auth/refresh` | Requires refresh cookie (`credentials` from browser) |
-| `POST` | `/api/v1/auth/logout` | Bearer access token + refresh cookie |
+| `POST` | `/api/v1/auth/logout` | Refresh cookie (access JWT optional) |
 | `GET` | `/api/v1/auth/me` | Bearer access token |
 
 Development flow:
@@ -145,9 +146,29 @@ Cookie path is scoped to `/api/v1/auth`; the web client calls the API with `cred
 Database integration test (optional):
 
 ```bash
-RUN_DB_INTEGRATION=true pnpm --filter @syncboard/api test:integration:db
-RUN_DB_INTEGRATION=true pnpm --filter @syncboard/api test:e2e   # includes auth flows
+RUN_DB_INTEGRATION=true pnpm --filter @syncboard/api test:integration:db  # concurrent refresh
+RUN_DB_INTEGRATION=true pnpm --filter @syncboard/api test:e2e   # auth + dist startup
 ```
+
+## Workspaces (Milestone 3)
+
+Authenticated users can create workspaces, manage membership (`OWNER` / `ADMIN` / `MEMBER`), and share manual invitation links. See [docs/architecture/workspaces.md](docs/architecture/workspaces.md).
+
+| Method | Endpoint | Notes |
+| --- | --- | --- |
+| `POST` | `/api/v1/workspaces` | Create workspace (caller becomes `OWNER`) |
+| `GET` | `/api/v1/workspaces` | List workspaces for current user |
+| `GET` | `/api/v1/workspaces/:workspaceId` | Details + members (members only) |
+| `PATCH` | `/api/v1/workspaces/:workspaceId` | Rename (`OWNER` / `ADMIN`) |
+| `GET` | `/api/v1/workspaces/:workspaceId/members` | Member list |
+| `PATCH` | `/api/v1/workspaces/:workspaceId/members/:memberId` | Change role (`OWNER` only) |
+| `DELETE` | `/api/v1/workspaces/:workspaceId/members/:memberId` | Remove member or leave (self) |
+| `POST` | `/api/v1/workspaces/:workspaceId/invitations` | Create invitation; response includes shareable `invitationUrl` |
+| `GET` | `/api/v1/workspaces/:workspaceId/invitations` | Pending invites (no tokens) |
+| `DELETE` | `/api/v1/workspaces/:workspaceId/invitations/:invitationId` | Revoke |
+| `POST` | `/api/v1/invitations/accept` | Body `{ "token": "..." }`; email must match JWT user |
+
+Web routes: `/workspaces`, `/workspaces/new`, `/workspaces/[id]`, `/invitations/accept?token=…`.
 
 ## Testing commands
 
